@@ -1,0 +1,480 @@
+       IDENTIFICATION  DIVISION.
+       PROGRAM-ID.     COBMAIN.
+     
+      *----------------------------------------------------------------*
+      * TEMPLATE FOR CHANNELS/CONTAINERS USE IN CICS                   *
+      * THIS MODULE:                                                   * 
+      *  - GETS CONTAINERS FROM MAIN CHANNEL (FROM COBSTART) AND PUTS  *
+      *    CONTAINERS ON A DIFFERENT CHANNEL                           *
+      *  - LINKS NEXT MODULE VIA LINK (SAME CICS: COBCHAN, DIFFERENT   *
+      *    CICS: COBCICS2) THROUGH THE NEW CHANNEL                     *
+      *  - AFTER LINKED MODULE HAS COMPLETED, IT GETS THE ANSWER       *
+      *    FROM THE NEW CHANNEL AND PUTS ITS ANSWER ON MAIN CHANNEL    *
+      *----------------------------------------------------------------*
+       ENVIRONMENT DIVISION.
+
+       CONFIGURATION SECTION.
+
+       SOURCE-COMPUTER.  IBM-370.
+       OBJECT-COMPUTER.  IBM-370.
+
+       SPECIAL-NAMES.
+           DECIMAL-POINT IS COMMA.
+
+       DATA DIVISION.
+
+       WORKING-STORAGE SECTION.
+
+       77  PGM-NAME                 PIC X(8)           VALUE 'COBMAIN'.
+
+
+       01  WS-RESP-X.
+         03 WS-RESP-N                  PIC 9(4).
+
+       01  ERR-AREA.
+           03 ER-RET-CODE              PIC 9(8).
+           03 ER-DESCR-RESULT          PIC X(50).
+
+       01  WS-CHANNEL                  PIC X(16)        VALUE SPACE.
+       01  WS-CONTAINER                PIC X(16)        VALUE
+                                       'DatiChiamata'.
+       01  WS-LENGTH                   PIC S9(9)  COMP  VALUE ZERO.
+       01  WS-RESP                     PIC S9(4)  COMP  VALUE ZERO.
+       01  WS-OPER                     PIC X(20).
+       01  WS-CONT-L-I                 PIC S9(9)  COMP  VALUE ZERO.
+       01  WS-CONT-L-O                 PIC S9(9)  COMP  VALUE ZERO.
+
+       LINKAGE SECTION.
+
+       01  TECH-AREA.
+           03 TA-ACTION-TYPE        PIC 9(4).
+             88 TYPE-CHANNEL          VALUE 1.
+             88 TYPE-CICS2            VALUE 2.
+             88 TYPE-BESTP            VALUE 3.
+           03 TA-PGM-NAME           PIC X(8).
+           03 TA-CONTAINER-I        PIC X(16).
+           03 TA-CONTAINER-O        PIC X(16).
+           03 TA-CONTAINER-ERR      PIC X(16).
+           03 TA-LOC-CHANNEL        PIC X(16).
+           03 TA-LOC-CONTAINER      PIC X(16).
+           03 TA-LOC-CONTAINER-I    PIC X(16).
+           03 TA-LOC-CONTAINER-O    PIC X(16).
+
+      *---------------------------------------------------------------*
+      *    AREA PER CREAZIONE DFHCOMMAREA DEL PGM CHIAMATO            *
+      *---------------------------------------------------------------*
+
+       01  CT-AREA-I.
+           03 CT-BYTE-I                PIC X
+                                       OCCURS 1 TO 1024000
+                                       DEPENDING ON WS-CONT-L-I.
+       01  CT-AREA-O.
+           03 CT-BYTE-O                PIC X
+                                       OCCURS 1 TO 1024000
+                                       DEPENDING ON WS-CONT-L-O.
+
+       PROCEDURE DIVISION.
+
+
+           PERFORM INITIAL            THRU EXINITIAL.
+           PERFORM ELAB               THRU EXELAB.
+           PERFORM FINAL              THRU EXFINAL.
+
+           EXEC CICS
+                   RETURN
+           END-EXEC.
+
+           GOBACK.
+
+       INITIAL.
+
+           EXEC CICS HANDLE CONDITION ...
+           END-EXEC
+
+      * Identify main channel 
+           EXEC CICS
+                   ASSIGN
+                   CHANNEL(WS-CHANNEL)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           IF   WS-RESP         =   DFHRESP(NORMAL)
+           AND  WS-CHANNEL  NOT =   SPACE
+              CONTINUE
+           ELSE
+              EXEC CICS
+                      ABEND
+                      ABCODE('CHAN')
+              END-EXEC
+           END-IF.
+      * Retrieve Technical Container from main channel
+           EXEC CICS
+                   GET CONTAINER(WS-CONTAINER)
+                   CHANNEL(WS-CHANNEL)
+                   FLENGTH(WS-LENGTH)
+                   SET(ADDRESS OF TECH-AREA)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'GET TECH AREA'          TO WS-OPER.
+           PERFORM CHECK-RESP          THRU EXCHECK-RESP.
+
+           IF TA-CONTAINER-I      =      LOW-VALUE
+              MOVE SPACE                 TO TA-CONTAINER-I
+           END-IF.
+
+           IF TA-CONTAINER-O      =      LOW-VALUE
+              MOVE SPACE                 TO TA-CONTAINER-O
+           END-IF.
+      * Identify type of request
+           EVALUATE     TRUE
+             WHEN   TA-PGM-NAME  =  SPACE OR LOW-VALUE
+               MOVE 'PROGRM NAME IS MISSING'   TO ER-DESCR-RESULT
+               MOVE 4                          TO ER-RET-CODE 
+               PERFORM ERROR-MGMT            THRU EXERROR-MGMT
+             WHEN   TYPE-CHANNEL
+               PERFORM CHK-TYPE-CHANNEL      THRU EXCHK-TYPE-CHANNEL
+             WHEN   TYPE-CICS2
+               PERFORM CHK-TYPE-CICS2        THRU EXCHK-TYPE-CICS2
+             WHEN   TYPE-BESTP
+               PERFORM CHK-TYPE-BESTP        THRU EXCHK-TYPE-BESTP
+             WHEN OTHER
+               MOVE 'ACTION-TYPE NOT MANAGED'  TO ER-DESCR-RESULT
+               MOVE 4                          TO ER-RET-CODE
+               PERFORM ERROR-MGMT            THRU EXERROR-MGMT
+           END-EVALUATE.
+       EXINITIAL.
+           EXIT.
+
+       ELAB.
+      * Get input container
+           EXEC CICS
+                   GET CONTAINER(TA-CONTAINER-I)
+                   CHANNEL(WS-CHANNEL)
+                   FLENGTH(WS-CONT-L-I)
+                   SET(ADDRESS OF CT-AREA-I)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'GET INPUT'                 TO WS-OPER.
+           PERFORM CHECK-RESP             THRU EXCHECK-RESP.
+
+           EVALUATE     TRUE
+             WHEN  TYPE-CHANNEL
+               PERFORM CHAN-MGMT          THRU EXCHAN-MGMT
+             WHEN  TYPE-CICS2
+               PERFORM CICS2-MGMT         THRU EXCICS2-MGMT
+             WHEN  TYPE-BESTP
+               PERFORM BESTP-MGMT         THRU EXBESTP-MGMT
+           END-EVALUATE.
+       EXELAB.
+           EXIT.
+
+       FINAL.
+           MOVE 'Completed OK'              TO ER-DESCR-RESULT
+      * Get output of linked module
+           IF  TYPE-BESTP
+             EXEC CICS
+                     GET CONTAINER(TA-LOC-CONTAINER-O)
+                     CHANNEL(TA-LOC-CHANNEL)
+                     FLENGTH(WS-CONT-L-O)
+                     SET(ADDRESS OF CT-AREA-O)
+                     RESP(WS-RESP)
+             END-EXEC
+
+             EVALUATE CT-AREA-O(1:1)
+               WHEN '0'
+      *  linked module elaboration OK - put output container
+                 EXEC CICS
+                         PUT CONTAINER(TA-CONTAINER-O)
+                         CHANNEL(WS-CHANNEL)
+                         FROM(CT-AREA-O)
+                         FLENGTH(WS-CONT-L-O)
+                         RESP(WS-RESP)
+                 END-EXEC
+                 MOVE 'PUT TESTATA'           TO WS-OPER
+                 PERFORM CHECK-RESP         THRU EXCHECK-RESP
+      *  linked module Warning: put application and error containers  
+               WHEN '4'
+
+                 EXEC CICS
+                         PUT CONTAINER(TA-CONTAINER-O)
+                         CHANNEL(WS-CHANNEL)
+                         FROM(CT-AREA-O)
+                         FLENGTH(LENGTH OF CT-AREA-O)
+                         RESP(WS-RESP)
+                 END-EXEC
+
+
+                 EXEC CICS
+                        PUT CONTAINER(TA-CONTAINER-ERR)
+                        CHANNEL(WS-CHANNEL)
+                        FROM(TA-AREA-ERR)
+                        FLENGTH(LENGTH OF TA-AREA-ERR)
+                        RESP(WS-RESP)
+                 END-EXEC
+       
+               WHEN OTHER
+      *  linked module error: put only error container
+                 STRING 'Error Code - ' CT-AREA-O(2:4)
+                 DELIMITED BY SIZE INTO TA-AREA-ERR
+
+                 EXEC CICS
+                         PUT CONTAINER(TA-CONTAINER-ERR)
+                         CHANNEL(WS-CHANNEL)
+                         FROM(TA-AREA-ERR)
+                         FLENGTH(LENGTH OF TA-AREA-ERR)
+                         RESP(WS-RESP)
+                 END-EXEC
+               END-EVALUATE
+             ELSE
+      * CHAR or CICS2
+               EXEC CICS
+                       PUT CONTAINER(WS-CONTAINER)
+                       CHANNEL(WS-CHANNEL)
+                       FROM(TECH-AREA)
+                       FLENGTH(LENGTH OF TECH-AREA)
+                       RESP(WS-RESP)
+               END-EXEC
+
+               MOVE 'PUT TECH AREA'           TO WS-OPER
+               PERFORM CHECK-RESP           THRU EXCHECK-RESP
+
+               EXEC CICS
+                       PUT CONTAINER(TA-CONTAINER-I)
+                       CHANNEL(WS-CHANNEL)
+                       FROM(CT-AREA-I)
+                       FLENGTH(LENGTH OF CT-AREA-I)
+                       RESP(WS-RESP)
+               END-EXEC
+
+               MOVE 'PUT INPUT'               TO WS-OPER
+               PERFORM CHECK-RESP           THRU EXCHECK-RESP
+               IF TA-CONTAINER-O  NOT =  SPACE
+                 EXEC CICS
+                         PUT CONTAINER(TA-CONTAINER-O)
+                         CHANNEL(WS-CHANNEL)
+                         FROM(CT-AREA-O)
+                         FLENGTH(LENGTH OF CT-AREA-O)
+                         RESP(WS-RESP)
+                 END-EXEC
+
+                 MOVE 'PUT OUTPUT'            TO WS-OPER
+                 PERFORM CHECK-RESP         THRU EXCHECK-RESP
+
+               END-IF
+
+           END-IF
+CDC        .
+       EXFINAL.
+           EXIT.
+
+       CHAN-MGMT.
+      * Add application logic
+           EXEC CICS
+                   PUT CONTAINER(TA-LOC-CONTAINER)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   FROM(CT-AREA-I)
+                   FLENGTH(LENGTH OF CT-AREA-I)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'PUT LOCAL'                     TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+      *  link module
+           EXEC  CICS
+                   LINK
+                   PROGRAM(TA-PGM-NAME)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'LINK CHANNEL'                TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+           MOVE LENGTH OF CT-AREA-I           TO WS-LENGTH.
+           EXEC CICS
+                   GET CONTAINER(TA-LOC-CONTAINER)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   INTO(CT-AREA-I)
+                   FLENGTH(WS-LENGTH)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+
+-
+           MOVE '0300'                        TO CT-AREA-I(3:4)
+           MOVE 'GET LOCAL''                     TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+
+       EXCHAN-MGMT.
+           EXIT.
+
+       CICS2-MGMT.
+      * Add application logic
+           EXEC CICS
+                   PUT CONTAINER(TA-LOC-CONTAINER)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   FROM(CT-AREA-I)
+                   FLENGTH(LENGTH OF CT-AREA-I)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'PUT LOCAL'                    TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+
+           EXEC CICS
+                   LINK
+                   PROGRAM(TA-PGM-NAME)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'CICS2 CHANNEL'               TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+           MOVE LENGTH OF CT-AREA-I           TO WS-LENGTH.
+
+           EXEC CICS
+                   GET CONTAINER(TA-LOC-CONTAINER)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   INTO(CT-AREA-I)
+                   FLENGTH(WS-LENGTH)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'GET PGM'                     TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+
+       EXCICS2-MGMT.
+           EXIT.
+
+       BESTP-MGMT.
+      * Add application logic
+           EXEC CICS
+                   PUT CONTAINER(TA-LOC-CONTAINER-I)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   FROM(CT-AREA-I)
+                   FLENGTH(LENGTH OF CT-AREA-I)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           EXEC CICS
+                   PUT CONTAINER(WS-CONTAINER)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   FROM(APPL-DATA)
+                   FLENGTH(LENGTH OF APPL-DATA)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'PUT LOC'                     TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+
+           EXEC  CICS
+                   LINK
+                   PROGRAM(TA-PGM-NAME)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   RESP(WS-RESP)
+           END-EXEC.
+
+           MOVE 'BEST PRACTICE'                TO WS-OPER.
+           PERFORM CHECK-RESP               THRU EXCHECK-RESP.
+           MOVE LENGTH OF CT-AREA-I           TO WS-LENGTH.
+
+       EXBESTP-MGMT.
+           EXIT.
+
+
+       CHK-TYPE-CHANNEL.
+           EVALUATE     TRUE
+             WHEN   TA-CONTAINER-O NOT = SPACE
+               MOVE 'OUTPUT CONTAINER NOT MANAGED'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+             WHEN   TA-LOC-CHANNEL    =  SPACE
+               MOVE 'MISSING LOCAL CHANNEL NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+             WHEN   TA-LOC-CONTAINER  =  SPACE
+               MOVE 'MISSING LOCAL CONTAINER NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE-BESTP
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+           END-EVALUATE.
+
+       EXCHK-TYPE-CHANNEL.
+           EXIT.
+
+       CHK-TYPE-CICS2.
+           EVALUATE     TRUE
+             WHEN   T-LOC-CHANNEL    =  SPACE
+               MOVE 'MISSING LOCAL CHANNEL NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+             WHEN   TA-LOC-CONTAINER  =  SPACE
+               MOVE 'MISSING LOCAL CONTAINER NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+           END-EVALUATE.
+
+       EXCHK-TYPE-CICS2.
+           EXIT.
+
+       CHK-TYPE-BESTP.
+           EVALUATE     TRUE
+             WHEN   TA-LOC-CHANNEL    =  SPACE
+               MOVE 'MISSING LOCAL CHANNEL NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+             WHEN   TA-LOC-CONTAINER-I  =  SPACE
+               MOVE 'MISSING LOCAL INPUT CONTAINER NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+             WHEN   TA-LOC-CONTAINER-O  =  SPACE
+               MOVE 'MISSING LOCAL OUTPUT CONTAINER NAME'
+                                              TO ER-DESCR-RESULT
+               MOVE 8                         TO ER-RET-CODE
+               PERFORM ERROR-MGMT         THRU EXERROR-MGMT
+           END-EVALUATE.
+       EXCHK-TYPE-BESTP.
+           EXIT.
+
+       CHECK-RESP.
+
+           EVALUATE     WS-RESP
+             WHEN DFHRESP(NORMAL)
+               CONTINUE
+             WHEN OTHER
+               MOVE WS-RESP                    TO WS-RESP-N
+               STRING 'ERROR OPERATION - ' WS-OPER
+                      ' - RESP: '  WS-RESP-X
+                 DELIMITED BY SIZE           INTO ER-DESCR-RESULT
+               MOVE 8                          TO ER-RET-CODE
+               PERFORM ERROR-MGMT          THRU EXERROR-MGMT
+           END-EVALUATE.
+       EXCHECK-RESP.
+           EXIT.
+
+       ERROR-MGMT.
+           STRING 'ERROR!! - ' ER-DESCR-RESULT
+                  DELIMITED BY SIZE         INTO ERR-AREA
+
+           EXEC CICS
+                   PUT CONTAINER(TA-CONTAINER-ERR)
+                   CHANNEL(WS-CHANNEL)
+                   FROM(ERR-AREA)
+                   FLENGTH(LENGTH OF ERR-AREA)
+                   RESP(WS-RESP)
+           END-EXEC
+
+           EXEC CICS
+                   RETURN
+           END-EXEC.
+       EXERROR-MGMT.
+           EXIT.
+
+

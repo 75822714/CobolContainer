@@ -1,0 +1,106 @@
+       IDENTIFICATION  DIVISION.
+       PROGRAM-ID.     COBCHAN.
+
+      *----------------------------------------------------------------*
+      * TEMPLATE FOR CHANNELS/CONTAINERS USE IN CICS                   *
+      * THIS MODULE:                                                   * 
+      *  - RUNS IN THE SAME CICS AS THE CALLING MODULE COBMAIN         *
+      *  - GETS CONTAINERS CREATED BY COBMAIN ON THE LOCAL CHANNEL     *  
+      *  - PUT REPLIES ON THE SAME CHANNEL                             *
+      *----------------------------------------------------------------*
+      *  IN THIS CASE CONAINERS NAMES HAVE TO BE AGREED IN ADVANCE     *  
+      *  SINCE THEY ARE ASSIGNED AS FIXED VALUES IN THE CODE.          *
+      *  NO SPECIFIC CONTAINER IS USED FOR ERROR MANAGEMENT            *
+      *----------------------------------------------------------------*
+       ENVIRONMENT DIVISION.
+
+       CONFIGURATION SECTION.
+
+        SOURCE-COMPUTER.  IBM-370.
+        OBJECT-COMPUTER.  IBM-370.
+
+        SPECIAL-NAMES.
+           DECIMAL-POINT IS COMMA.
+
+       DATA DIVISION.
+
+       WORKING-STORAGE SECTION.
+
+       77  PGM-NAME                 PIC X(8)           VALUE 'COBCHAN'.
+       77  IND                      PIC S9(4)     COMP VALUE ZERO.
+
+       01  WS-CHANNEL               PIC X(16)          VALUE 'MyChannel'.
+       01  WS-CONTAINER             PIC X(16)          VALUE 'MyData'.
+       01  WS-LENGTH                PIC S9(4)          VALUE ZERO.
+
+
+       LINKAGE SECTION.
+
+       01  APP-AREA.
+
+           05 APP-ACTION-TYPE      PIC S9(4)        COMP.
+           05 APP-NUMBER           PIC  9(4)            .
+           05 APP-RET-CODE         PIC S9(4)        COMP.
+             88 FAILURE               VALUE ZERO.
+             88 SUCCESS               VALUE 1.
+         03 APP-DESCR-RESULT       PIC X(50).
+         03 APP-TAB.
+           05 APP-ELEM    OCCURS  1 TO 1000
+                                  DEPENDING ON APP-NUMBER.
+             07 APP-FIELD         PIC X(1000).
+
+       PROCEDURE DIVISION.
+
+           PERFORM INITIAL             THRU EXINITIAL.
+
+           PERFORM ELAB                THRU EXELAB.
+
+           PERFORM FINAL               THRU EXFINAL.
+
+           EXEC CICS
+                   RETURN
+           END-EXEC.
+
+           GOBACK.
+
+       INITIAL.
+      * Retrieve Container with Application data 
+      * Channel could be omitted, channel specified in link would be used
+           EXEC CICS
+                   GET CONTAINER(WS-CONTAINER)
+                   CHANNEL(WS-CHANNEL)
+                   FLENGTH(WS-LENGTH)
+                   SET(ADDRESS OF APP-AREA)
+           END-EXEC.
+           .
+       EXINITIAL.
+           EXIT.
+
+       ELAB.
+      * Start application logic
+           MOVE   nn     TO APP-NUMBER
+
+           PERFORM
+              VARYING  IND      FROM 1 BY 1
+                UNTIL   IND     GREATER  APP-NUMBER
+              MOVE ALL 'A'      TO APP-FIELD (IND)
+          END-PERFORM.
+      * End of application logic  
+       EXELAB.
+           EXIT.
+
+       FINAL.
+
+           SET SUCCESS                   TO TRUE.
+           MOVE 'Successful elaboration'  TO APP-DESCR-RESULT.
+
+           EXEC CICS
+                   PUT CONTAINER(WS-CONTAINER)
+                   CHANNEL(WS-CHANNEL)
+                   FROM(APP-AREA)
+                   FLENGTH(LENGTH OF APP-AREA)
+           END-EXEC.
+
+       EXFINAL.
+           EXIT.
+

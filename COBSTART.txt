@@ -1,0 +1,262 @@
+       IDENTIFICATION    DIVISION.
+       PROGRAM-ID.       COBMAIN.
+      *
+      *----------------------------------------------------------------*
+      * TEMPLATE FOR CHANNELS/CONTAINERS USE IN CICS - CLIENT MODULE   *
+      * THIS MODULE:                                                   * 
+      *  - PUTS THREE CONTAINERS ON CHANNEL.                           * 
+      *  - CALLS THE NEXT MODULE (COBMAIN) VIA LINK THROUGH CHANNEL    *	 
+      *  - AFTER COBMAIN HAS COMPLETED, IT GETS THE ANSWER             *
+      *                                                                *
+      *----------------------------------------------------------------*
+      * THIS MODULE RECEIVE A PARAMETER IN INPUT, BASED ON ITS VALUE   *
+      * THE FOLLOWING SCENARIOS ARE MANAGED:                           *
+      *   1 -> FIRST SCENARIO: SINGLE CICS, NO CONTAINER FOR ERROR     *
+      *   2 -> SECOND SCENARIO: MULTIPLE CICS, NO CONTAINER ERROR      *
+      *   3 -> THIRD SCENARIO: MULTIPLE CICS, USE OF CONTAINER ERROR   *
+      *----------------------------------------------------------------*
+      *
+      *
+       ENVIRONMENT DIVISION.
+       CONFIGURATION SECTION.
+       SPECIAL-NAMES.
+           DECIMAL-POINT   IS  COMMA.
+      *
+       DATA DIVISION.
+      *
+       WORKING-STORAGE SECTION.
+      *
+       01  W-PGM               PIC X(8)               VALUE 'COBMAIN'.
+
+       01  WS-CHANNEL                  PIC X(16)        VALUE
+                                       'DataChannel'.
+       01  WS-CONTAINER                PIC X(16)        VALUE
+                                       'CallData'.
+       01  WS-LEN-LK                   PIC S9(9)  COMP  VALUE ZERO.
+       01  WS-RESP                     PIC S9(4)  COMP  VALUE ZERO.
+       01  WS-RESP2                    PIC S9(4)  COMP  VALUE ZERO.
+
+       01  TECH-AREA.
+           03 TA-ACTION-TYPE        PIC 9(4).
+             88 TYPE-CHANNEL          VALUE 1.
+             88 TYPE-CICS2            VALUE 2.
+             88 TYPE-BESTP            VALUE 3.
+           03 TA-PGM-NAME           PIC X(8).
+           03 TA-CONTAINER-I        PIC X(16).
+           03 TA-CONTAINER-O        PIC X(16).
+           03 TA-CONTAINER-ERR      PIC X(16).
+           03 TA-LOC-CHANNEL        PIC X(16).
+           03 TA-LOC-CONTAINER      PIC X(16).
+           03 TA-LOC-CONTAINER-I    PIC X(16).
+           03 TA-LOC-CONTAINER-O    PIC X(16).
+		   
+       01  AREA1                    PIC X(100)           VALUE SPACES    .
+       01  AREA2                    PIC X(100)           VALUE SPACES    .
+	   
+       01  ERR-AREA.
+           03 ER-RET-CODE           PIC 9(8).
+           03 ER-DESCR-RESULT       PIC X(50).
+
+      
+       01  APP-AREA.
+           03 APP-ACTION-TYPE      PIC S9(4)        COMP.
+           03 APP-NUMBER           PIC  9(4)            .
+           03 APP-RET-CODE         PIC S9(4)        COMP.
+             88 FAILURE             VALUE ZERO.
+             88 SUCCESS             VALUE 1.
+
+           03 APP-DESCR-RESULT      PIC X(50).
+           03 APP-TAB.
+              05 APP-ELE    OCCURS  1 TO 1000
+                                    DEPENDING ON TEST-NUMERO.
+                 07 APP-FIELD      PIC X(1000).
+
+       LINKAGE SECTION.
+
+       01  DFHCOMMAREA.
+           03 ELAB_TYPE             PIC 9.
+
+       PROCEDURE DIVISION.
+      *
+           PERFORM   INITIAL        THRU EXINITIAL.
+           PERFORM   ELAB           THRU EXELAB.
+      *
+           GOBACK.
+      *
+       INITIAL.
+           EXEC CICS IGNORE CONDITION CONTAINERERR ...
+            ...
+           END-EXEC
+           .
+       EXINITIAL.
+           EXIT.
+
+       ELAB.
+      * error checks on container operations are not included
+           INITIALIZE                  TECH-AREA.
+           MOVE 'InputData'            TO TA-CONTAINER-I.
+           MOVE 'ErrorData'            TO TA-CONTAINER-ERR.
+
+           EVALUATE ELAB-TYPE
+             WHEN         1
+               SET TYPE-CHANNEL         TO TRUE
+               MOVE 'COBCHAN'           TO TA-LOC-NAME
+               MOVE 'MyChannel'         TO TA-LOC-CHANNEL
+               MOVE 'MyData'            TO TA-LOC-CONTAINER
+      * application logic init
+               MOVE 1                   TO APP-ACTION-TYPE
+               MOVE 100                 TO APP-NUMBER
+      * application logic end
+               EXEC CICS
+                       PUT CONTAINER(TA-CONTAINER-I)
+                       CHANNEL(WS-CHANNEL)
+                       FROM(APP-AREA)
+                       FLENGTH(LENGTH OF APP-AREA)
+               END-EXEC
+
+
+             WHEN         2
+               SET TYPE-BANCA              TO TRUE
+               MOVE 'COBCICS2'             TO TA-PGM-NAME
+               MOVE 'MyChannel'            TO TA-LOC-CHANNEL
+               MOVE 'MyData'               TO TA-LOC-CONTAINER
+
+               INITIALIZE                  AREA1
+               MOVE 'DIFFERENT CICS CASE' TO AREA1
+
+               EXEC CICS
+                       PUT CONTAINER(TA-CONTAINER-I)
+                       CHANNEL(WS-CHANNEL)
+                       FROM(AREA1)
+                       FLENGTH(LENGTH OF AREA1)
+               END-EXEC
+
+               EXEC CICS
+                       PUT CONTAINER(TA-CONTAINER-O)
+                       CHANNEL(WS-CHANNEL)
+                       FROM(AREA2)
+                       FLENGTH(LENGTH OF AREA2)
+               END-EXEC
+
+
+             WHEN         3
+               SET TYPE-BESTP              TO TRUE
+               MOVE 'COBCICS2'             TO TA-PGM-NAME
+               MOVE 'MyChannel'            TO TA-LOC-CHANNEL
+               MOVE 'InputData'            TO TA-LOC-CONTAINER-I
+               MOVE 'OutputData'           TO TA-LOC-CONTAINER-O
+               MOVE 'DatiOutput'           TO TA-CONTAINER-O
+
+               INITIALIZE                  AREA1
+               MOVE 'BEST PRACTICE CASE'   TO AREA1
+
+               EXEC CICS
+                       PUT CONTAINER(TA-CONTAINER-I)
+                       CHANNEL(WS-CHANNEL)
+                       FROM(AREA1)
+                       FLENGTH(LENGTH OF AREA1)
+               END-EXEC
+
+             WHEN OTHER
+
+               GOBACK
+
+           END-EVALUATE.
+
+           EXEC CICS
+                   PUT CONTAINER(WS-CONTAINER)
+                   CHANNEL(WS-CHANNEL)
+                   FROM(TECH-AREA)
+                   FLENGTH(LENGTH OF TECH-AREA)
+           END-EXEC.
+
+           EXEC CICS
+                   LINK
+                   PROGRAM('COBMAIN')
+                   CHANNEL(WS-CHANNEL)
+           END-EXEC.
+
+
+
+           EVALUATE ELAB-TYPE
+
+              WHEN         1
+                EXEC CICS
+                        GET CONTAINER(WS-CONTAINER)
+                        CHANNEL(WS-CHANNEL)
+                        INTO (TECH-AREA)
+                        FLENGTH(LENGTH OF TECH-AREA)
+                END-EXEC
+
+                EXEC CICS
+                        GET CONTAINER(TA-CONTAINER-I)
+                        CHANNEL(WS-CHANNEL)
+                        INTO (APP-AREA)
+                        FLENGTH(LENGTH OF APP-AREA)
+                END-EXEC
+
+
+             WHEN         2
+               EXEC CICS
+                       GET CONTAINER(WS-CONTAINER)
+                       CHANNEL(WS-CHANNEL)
+                       INTO (TECH-AREA)
+                       FLENGTH(LENGTH OF TECH-AREA)
+               END-EXEC
+
+               EXEC CICS
+                       GET CONTAINER(TA-CONTAINER-I)
+                       CHANNEL(WS-CHANNEL)
+                       INTO (AREA1)
+                       FLENGTH(LENGTH OF AREA1)
+
+               END-EXEC
+
+               EXEC CICS
+                       GET CONTAINER(TA-CONTAINER-O)
+                       CHANNEL(WS-CHANNEL)
+                       INTO (AREA2)
+                       FLENGTH(LENGTH OF AREA2)
+
+               END-EXEC
+
+           WHEN         3
+              EXEC CICS
+                      GET CONTAINER(TA-CONTAINER-ERR)
+                      CHANNEL(WS-CHANNEL)
+                      INTO (ERR-AREA)
+                      FLENGTH(LENGTH OF ERR-AREA)
+                      RESP (WS-RESP)
+                      RESP2(WS-RESP2)
+              END-EXEC
+      * Check results:
+      * If Container error is returned, but error area show a warning
+      * or Container error is not returned
+      * application data are returned so a second GET is performed
+              IF(WS-RESP = DFHRESP(CONTAINERERR) AND WS-RESP2 = 10) OR
+                (WS-RESP = DFHRESP(NORMAL) AND ERR-AREA(1:1)='W')
+
+                EXEC CICS
+                       GET CONTAINER(TA-CONTAINER-O)
+                       CHANNEL(WS-CHANNEL)
+                       INTO (AREA1)
+                       FLENGTH(LENGTH OF AREA1)
+                END-EXEC
+      
+      *      Container with application data is received
+
+             ELSE
+      * If Container error is returned, called module has ended in error
+                IF WS-RESP = DFHRESP(NORMAL)
+                  THEN
+      *                 manage error
+                END-IF
+			  END-IF
+           END-EVALUATE.
+
+       EXELAB.
+           EXIT.
+
+
+
+

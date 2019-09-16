@@ -1,0 +1,134 @@
+       IDENTIFICATION  DIVISION.
+       PROGRAM-ID.     COBCICS2.
+
+      *----------------------------------------------------------------*
+      * TEMPLATE FOR CHANNELS/CONTAINERS USE IN CICS                   *
+      * THIS MODULE:                                                   * 
+      *  - RUNS IN A DIFFERENT CICS THAN CALLING MODULE COBMAIN        *
+      *  - GETS CONTAINERS CREATED BY COBMAIN ON THE LOCAL CHANNEL     *  
+      *  - PUT REPLIES ON THE SAME CHANNEL                             *
+      *----------------------------------------------------------------*
+      *  IN THIS CASE CONTAINER NAMES DON'T HAVE TO BEEN AGREED IN     *  
+      *  ADVANCE, SINCE THEY ARE PASSED AS VARIABLES IN THE CONTAINER  *
+      *  WITH TECHNICAL DATA.                                          *
+      *  DIFFERENT CONTAINERS ARE USED FOR INPUT AND OUTPUT, NO ERROR  *
+      *  CONTAINER IS USED.                                            *
+      *----------------------------------------------------------------*
+
+       ENVIRONMENT DIVISION.
+
+       CONFIGURATION SECTION.
+
+        SOURCE-COMPUTER.  IBM-370.
+        OBJECT-COMPUTER.  IBM-370.
+
+        SPECIAL-NAMES.
+           DECIMAL-POINT IS COMMA.
+
+       DATA DIVISION.
+
+       WORKING-STORAGE SECTION.
+       77  PGM-NAME                 PIC X(8)           VALUE 'COBCICS2'.
+
+       01  WS-RESP                  PIC S9(4)     COMP VALUE ZERO.
+       01  WS-CONTAINER             PIC X(16)          VALUE 'CallData'.
+       01  WS-LENGTH                PIC S9(4)          VALUE ZERO.
+
+       LINKAGE SECTION.
+
+       01  APPL-AREA               PIC X(100).
+
+       01  TECH-AREA.
+           03 TA-ACTION-TYPE        PIC 9(4).
+             88 TYPE-CHANNEL          VALUE 1.
+             88 TYPE-CICS2            VALUE 2.
+             88 TYPE-BESTP            VALUE 3.
+           03 TA-PGM-NAME           PIC X(8).
+           03 TA-CONTAINER-I        PIC X(16).
+           03 TA-CONTAINER-O        PIC X(16).
+           03 TA-CONTAINER-ERR      PIC X(16).
+           03 TA-LOC-CHANNEL        PIC X(16).
+           03 TA-LOC-CONTAINER      PIC X(16).
+           03 TA-LOC-CONTAINER-I    PIC X(16).
+           03 TA-LOC-CONTAINER-O    PIC X(16).
+
+       PROCEDURE DIVISION.
+ 
+           PERFORM INITIAL             THRU EXINITIAL.
+           PERFORM ELAB                THRU EXELAB.
+           PERFORM FINAL               THRU EXFINAL.
+
+           EXEC CICS
+                   RETURN
+           END-EXEC.
+
+           GOBACK.
+
+       INITIAL.
+ 
+           EXEC CICS HANDLE CONDITION
+                                      ...
+           END-EXEC
+ 
+      * Retrieve Container with Technical data (including container names)
+      * channel id can be omitted
+	  
+           EXEC CICS
+                   GET CONTAINER(WS-CONTAINER)
+                   FLENGTH(WS-LENGTH)
+                   SET(ADDRESS OF TECH-AREA)
+           END-EXEC.
+
+           PERFORM CHECK-RESP          THRU EXCHECK-RESP.
+           .
+       EXINITIAL.
+           EXIT.
+
+       ELAB.
+
+      * Retrieve Container with Input Application data
+           EXEC CICS
+                   GET CONTAINER(TA-LOC-CONTAINER-I)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   FLENGTH(WS-LENGTH)
+                   SET(ADDRESS OF APPL-AREA)
+           END-EXEC.
+ 
+           PERFORM CHECK-RESP          THRU EXCHECK-RESP.
+		   
+      * Beginning of application logic
+           MOVE 'xxxxxx' TO APPL-AREA
+      * End of application logic
+        	  .
+       EXELAB.
+           EXIT.
+
+      *-------------------------------------------------
+      *     Management of successful elaboration
+      *-------------------------------------------------
+       FINAL.
+      
+      * Put Container with Output Application data.
+      * Channel and container ids are retreived from technical area
+           EXEC CICS
+                   PUT CONTAINER(TA-LOC-CONTAINER-O)
+                   CHANNEL(TA-LOC-CHANNEL)
+                   FROM(APPL-AREA)
+                   FLENGTH(LENGTH OF APPL-AREA)
+           END-EXEC.
+
+       EXFINAL.
+           EXIT.
+
+       CHECK-RESP.
+           IF WS-RESP = DFHRESP(NORMAL)
+              CONTINUE
+           ELSE
+      *        Error Management
+           END-IF.
+
+       EXCHECK-RESP.
+           EXIT.
+
+      
+
